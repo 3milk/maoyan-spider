@@ -6,6 +6,7 @@ import re
 import os
 from fontTools.ttLib import TTFont
 import requests
+from lxml.html import fromstring, tostring
 
 class MyFileSpider(scrapy.Spider):
     name = 'myFilm'
@@ -14,8 +15,8 @@ class MyFileSpider(scrapy.Spider):
 
     custom_settings = {
         "ITEM_PIPELINES": {
-            'myFilm.pipelines.MyfilmPipeline': 300,
-            'myFilm.pipelines.MycommentPipeline': 300
+            'myFilm.pipelines.MyFilmPipeline': 300,
+            #'myFilm.pipelines.MyCommentPipeline': 300
         },
         "DEFAULT_REQUEST_HEADERS": {
             'accept': 'application/json, text/javascript, */*; q=0.01',
@@ -29,17 +30,28 @@ class MyFileSpider(scrapy.Spider):
     }
 
     def start_requests(self):
+        self.set_standar_font()
         url = '''https://maoyan.com/films?showType=3&offset={start}'''
         requests = []
         for i in range(2):
             request = Request(url.format(start=i * 30), callback=self.parse)
             requests.append(request)
         return requests
+    
+    # 建立标准字形库
+    def set_standar_font(self):
+        self.stdFont = TTFont('./fonts/std.woff') #deca.woff
+        keys = []
+        for number, gly in enumerate(self.stdFont.getGlyphOrder()):
+            keys.insert(number, gly)
+        #keys = self.stdFont['glyf'].keys()
+        values = list(' 4386275091.')
+        # 构建基准 {name: num}
+        self.stdDict = dict((k,v) for k,v in zip(keys, values))
 
     # 发送请求获得响应
     def get_html(self, url):
-        response = requests.get(url, headers=self.custom_settings[1])
-        #request = Request(filmUrl, callback=self.parseDetail)
+        response = requests.get(url, headers=self.custom_settings["DEFAULT_REQUEST_HEADERS"])
         return response.content
 
     # 创建 self.font 属性
@@ -55,72 +67,103 @@ class MyFileSpider(scrapy.Spider):
             with open('./fonts/' + font_file, 'wb') as f:
                 f.write(new_file)
 
-        # 打开字体文件，创建 self.font属性
-        self.font = TTFont('./fonts/' + font_file)
+        # 打开字体文件，创建 self.curFont属性
+        self.curFont = TTFont('./fonts/' + font_file)
+
+        # 设置当前字体和字符对应关系
+        self.curDict = {}
+        for key in self.curFont['glyf'].keys():
+            for k, v in self.stdDict.items():
+                # 通过比较 字形定义 填充新的name和num映射关系
+                if self.stdFont['glyf'][k] == self.curFont['glyf'][key]:
+                    self.curDict[key] = v.strip()
+                    break
+        # print(dict2)
 
     # 把获取到的数据用字体对应起来，得到真实数据
     def modify_data(self, data):
         # 获取 GlyphOrder 节点
-        gly_list = self.font.getGlyphOrder()
+        gly_list = self.curFont.getGlyphOrder()
         # 前两个不是需要的值，截掉
         gly_list = gly_list[2:]
         # 枚举, number是下标，正好对应真实的数字，gly是乱码
         for number, gly in enumerate(gly_list):
             # 把 gly 改成网页中的格式
-            gly = gly.replace('uni', '&#x').lower() + ';'
+            orgGly = gly
+            gly = gly.replace("uni", r"\u").lower() # uniE30C ---> \\ue30c
+            gly = gly.encode().decode('unicode_escape') # \\ue30c ---> \ue30c
             # 如果 gly 在字符串中，用对应数字替换
             if gly in data:
-                data = data.replace(gly, str(number))
+                data = data.replace(gly, self.curDict[orgGly]) #str(number)
         # 返回替换后的字符串
         return data
 
     def parseDetail(self, response):
         item = response.meta['item'] 
 
+        # ename
+        ename = response.xpath('//div[@class="movie-brief-container"]/div[@class="ename ellipsis"]/text()').extract()
+        item['ename'] = ename[0] if ename else ''
+
         # tag country length
-        item['tags'] = response.xpath('//div[@class="movie-brief-container"]/ul/li[1]/text()').extract()[0]
+        tags = response.xpath('//div[@class="movie-brief-container"]/ul/li[1]/text()').extract()
+        item['tags'] = tags[0] if tags else ''
         countryTime = response.xpath('//div[@class="movie-brief-container"]/ul/li[2]/text()').extract()[0]
-        item['country'] = countryTime.split()[0]
-        item['length'] = re.sub(r"\D", "", countryTime.split()[1]) #TODO '\n        中国香港,中国台湾\n          / 100分钟\n        '
-        
+        if countryTime:
+            strs = countryTime.split()
+            item['country'] = strs[0]
+            item['length'] = 0
+            for i in range(1, len(strs)): 
+                l = re.sub(r"\D", "", strs[i]) # '\n        中国香港,中国台湾\n          / 100分钟\n        '
+                if len(l) != 0:
+                    item['length'] = int(l)
+                    break
+        else:
+            item['country'] = ''
+            item['length'] = 0
+
         # releaseTime releaseTimeOnlyYear
-        releaseTime = response.xpath('//div[@class="movie-brief-container"]/ul/li[3]/text()').extract()[0]
-        item['releaseTime'] = re.sub("[^0-9-]", "", releaseTime)
-        if('-' not in releaseTime):
+        releaseTime = response.xpath('//div[@class="movie-brief-container"]/ul/li[3]/text()').extract()
+        item['releaseTime'] = re.sub("[^0-9-]", "", releaseTime[0]) if releaseTime else None
+        if(item['releaseTime'] and ('-' not in releaseTime[0])):
             item['releaseTimeOnlyYear'] = 1
         else:
             item['releaseTimeOnlyYear'] = 0
         
         # 正则匹配字体文件
-        html = response.xpath('//html/text()').extract()[0]#self.get_html(self.url).decode('utf-8')
+        html = response.xpath('//html').extract()[0]
         font_file = re.findall(r'vfile\.meituan\.net\/colorstone\/(\w+\.woff)', html)[0]
         self.create_font(font_file)
 
         # scorePeople scorePeopleUnit
         scorePeople = response.xpath('//div[@class="movie-stats-container"]/div[@class="movie-index"]/\
-            div[@class="movie-index-content score normal-score"]/div[@class="index-right"]/span[@class="score-num"]/span[@class="stonefont"]/text()').extract()[0]
-        if("万" in scorePeople):
-            item['scorePeopleNumUnit'] = 1
+            div[@class="movie-index-content score normal-score"]/div[@class="index-right"]/span[@class="score-num"]/span[@class="stonefont"]/text()').extract()
+        if scorePeople:
+            if("万" in scorePeople[0]):
+                item['scorePeopleNumUnit'] = 1
+            else:
+                item['scorePeopleNumUnit'] = 0
+            scorePeople = re.sub(r"[\u4e00-\u9fa5]", "", scorePeople[0])
+            item['scorePeopleNum'] = float(self.modify_data(scorePeople))
         else:
+            item['scorePeopleNum'] = 0
             item['scorePeopleNumUnit'] = 0
 
-        scorePeople = re.sub(r"[^0-9\.]", "", scorePeople)
-        item['scorePeopleNum'] = self.modify_data(scorePeople)
-        
-        item['scorePeopleNumUnit']
-
-        boxOffice = response.xpath('//div[@class="movie-index-content box"]/span[@class="stonefont"]').extract()[0]
-        unit = response.xpath('//div[@class="movie-index-content box"]/span[@class="unit"]').extract()[0]
-        noinfo = response.xpath('//div[@class="movie-index-content box"]/span[@class="no-info"]').extract()[0]
-        if(noinfo == None):
-            if(unit == '亿'):
-                item['boxOffice'] = boxOffice*10000
-            else:
-                item['boxOffice'] = boxOffice
+        # boxOffice 
+        noinfo = response.xpath('//div[@class="movie-index-content box"]/span[@class="no-info"]/text()').extract()
+        if(noinfo): #empty
+            item['boxOffice'] = 0
         else:
-            item['boxOffice'] = None
+            boxOffice = response.xpath('//div[@class="movie-index-content box"]/span[@class="stonefont"]/text()').extract()[0]
+            item['boxOffice'] = self.modify_data(boxOffice)
+            unit = response.xpath('//div[@class="movie-index-content box"]/span[@class="unit"]/text()').extract()[0]
+            if("亿" in unit):
+                item['boxOffice'] = int(float(item['boxOffice'])*10000)
+            else:
+                item['boxOffice'] = int(item['boxOffice'])
+        item['monetaryUnit'] = None
         
-        #item['actors'] = response.xpath()
+        item['actors'] = ""#response.xpath()
 
         yield item #yield
 
@@ -131,9 +174,13 @@ class MyFileSpider(scrapy.Spider):
             item['name'] = movie.xpath('./dd/div[@class="channel-detail movie-item-title"]/@title').extract()[0]
             filmUrl = movie.xpath('./dd/div[@class="channel-detail movie-item-title"]/a/@href').extract()[0]
             item['fid'] = filmUrl[7:] #/films/12504341
-            integer = movie.xpath('./dd/div[@class="channel-detail channel-detail-orange"]/i[@class="integer"]/text()').extract()[0]
-            fraction = movie.xpath('./dd/div[@class="channel-detail channel-detail-orange"]/i[@class="fraction"]/text()').extract()[0]
-            item['score'] = float(integer[:-1]) + 0.1*float(fraction)
+            noScore = movie.xpath('./dd/div[@class="channel-detail channel-detail-orange"]/text()').extract()
+            if noScore:
+                item['score'] = 0.0
+            else:
+                integer = movie.xpath('./dd/div[@class="channel-detail channel-detail-orange"]/i[@class="integer"]/text()').extract()[0]
+                fraction = movie.xpath('./dd/div[@class="channel-detail channel-detail-orange"]/i[@class="fraction"]/text()').extract()[0]
+                item['score'] = float(integer[:-1]) + 0.1*float(fraction)
 
             posterURL = movie.xpath('./dd/div[@class="movie-item"]/a/div[@class="movie-poster"]/img/@data-src').extract()[0]
             src = r'https://.*?.jpg' 

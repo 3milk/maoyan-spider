@@ -15,7 +15,7 @@ import pymysql
 #                        '\t' + item['tags'] + '\t' + item['actors'] + '\n')
         #return item
 
-class MyfilmPipeline(object):
+class MyFilmPipeline(object):
     movieInsert = '''insert into films(fid, name, ename, score, releaseTimeOnlyYear, releaseTime, boxOffice, monetaryUnit, \
         scorePeopleNum, scorePeopleNumUnit, actors, country, tags, length) values \
     ('{fid}','{name}','{ename}','{score}','{releaseTimeOnlyYear}','{releaseTime}','{boxOffice}','{monetaryUnit}',\
@@ -29,7 +29,11 @@ class MyfilmPipeline(object):
         results = self.cursor.fetchall()
         if len(results) > 0:
             score = item['score']
-            sql = 'update films set score=%f where fid =%s' % (score, fid)
+            boxOffice=item['boxOffice']
+            scorePeopleNum=item['scorePeopleNum']
+            scorePeopleNumUnit=item['scorePeopleNumUnit']
+            sql = 'update films set score=%f, boxOffice=%d, scorePeopleNum=%d, scorePeopleNumUnit=%d \
+                where fid =%s' % (score, boxOffice, scorePeopleNum, scorePeopleNumUnit, fid)
             self.cursor.execute(sql)
         else:
             sqlinsert = self.movieInsert.format(
@@ -42,11 +46,11 @@ class MyfilmPipeline(object):
                 boxOffice=item['boxOffice'],
                 monetaryUnit=item['monetaryUnit'],
                 scorePeopleNum=item['scorePeopleNum'],
-                scorePeopleNumUnit=item['scorePeopleNum'],
+                scorePeopleNumUnit=item['scorePeopleNumUnit'],
                 actors=pymysql.escape_string(item.get('actors')),
                 country=pymysql.escape_string(item.get('country')),
                 tags=pymysql.escape_string(item.get('tags')),
-                length=pymysql.escape_string(item.get('length')),
+                length=item['length'],
                 poster=pymysql.escape_string(item.get('poster'))
             )
             self.cursor.execute(sqlinsert)
@@ -70,7 +74,7 @@ class MyfilmPipeline(object):
         self.cursor.close()
         self.connect.close()
 
-class MycommentPipeline(object):
+class MyCommentPipeline(object):
     commentInsert = '''insert into comments(cid, fid, score, comment, liked, commentTime) values \
     ('{cid}','{fid}','{score}','{comment}','{liked}','{commentTime}')'''
 
