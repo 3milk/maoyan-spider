@@ -168,7 +168,8 @@ class MyFileSpider(scrapy.Spider):
 
         # releaseTime releaseTimeOnlyYear
         releaseTime = response.xpath('//div[@class="movie-brief-container"]/ul/li[3]/text()').extract()
-        item['releaseTime'] = re.sub("[^0-9-]", "", releaseTime[0]) if releaseTime else '1000-01-01'
+        releaseTime = releaseTime[0].split()[0] if releaseTime else '1000-01-01' #2018-03-05 8:00大陆上映
+        item['releaseTime'] = re.sub("[^0-9-]", "", releaseTime) #2018-03-05大陆上映
         if('-' not in item['releaseTime']):
             item['releaseTimeOnlyYear'] = 1
             item['releaseTime'] = item['releaseTime'] + "-01-01"
