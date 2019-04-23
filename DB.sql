@@ -22,8 +22,8 @@ CREATE TABLE if not exists `films` (
 
 CREATE TABLE if not exists `comments` (
     `cid` int PRIMARY KEY COMMENT 'comment id',
-    `fid` int COMMENT 'film id',
-    `score` float(2,1) NOT NULL COMMENT 'score',
+    `fid` int NOT NULL COMMENT 'film id',
+    `score` int NOT NULL COMMENT 'score',
     `comment` text NOT NULL COMMENT 'comment',
     `liked` int NOT NULL COMMENT 'comment liked number',
     `commentTime` timestamp NOT NULL COMMENT 'comment time'
