@@ -5,24 +5,17 @@
 # Don't forget to add your pipeline to the ITEM_PIPELINES setting
 # See: https://doc.scrapy.org/en/latest/topics/item-pipeline.html
 import pymysql
-
-#class MyfilmPipeline(object):
-#    def process_item(self, item, spider):
-#        with open("meiju.txt", 'a') as fp:
-#            fp.write(item['fid'] + '\t' + item['name'] + '\t' + item['score'] +
-#                '\t' + item['releaseTime'] + '\t' + item['boxOffice'] + 
-#                    '\t' + item['country'] + '\t' + item['length'] +
-#                        '\t' + item['tags'] + '\t' + item['actors'] + '\n')
-        #return item
+from myFilm.items import MyFilmItem, MyCommentItem
 
 class MyFilmPipeline(object):
     movieInsert = '''insert into films(fid, name, ename, score, releaseTimeOnlyYear, releaseTime, boxOffice, monetaryUnit, \
-        scorePeopleNum, scorePeopleNumUnit, actors, country, tags, length) values \
+        scorePeopleNum, scorePeopleNumUnit, actors, country, tags, length, poster) values \
     ('{fid}','{name}','{ename}','{score}','{releaseTimeOnlyYear}','{releaseTime}','{boxOffice}','{monetaryUnit}',\
-        '{scorePeopleNum}','{scorePeopleNumUnit}','{actors}','{country}','{tags}','{length}' )'''
+        '{scorePeopleNum}','{scorePeopleNumUnit}','{actors}','{country}','{tags}','{length}','{poster}' )'''
 
     def process_item(self, item, spider):
-
+        if not isinstance(item, MyFilmItem):
+            return item
         fid = item['fid']
         sql = 'select * from films where fid=%s'% fid
         self.cursor.execute(sql)
@@ -77,17 +70,21 @@ class MyFilmPipeline(object):
 class MyCommentPipeline(object):
     commentInsert = '''insert into comments(cid, fid, score, comment, liked, commentTime) values \
     ('{cid}','{fid}','{score}','{comment}','{liked}','{commentTime}')'''
+    commentUpdate = '''update comments set comment='{comm}' where cid ={cid}'''
 
     def process_item(self, item, spider):
-
+        if not isinstance(item, MyCommentItem):
+            return item
         cid = item['cid']
-        sql = 'select * from comments where cid=%s'% cid
+        sql = 'select * from comments where cid=%d'% cid
         self.cursor.execute(sql)
         results = self.cursor.fetchall()
         if len(results) > 0:
-            comment = item['score']
-            sql = 'update comments set comment=%s where cid =%s' % (comment, cid)
-            self.cursor.execute(sql)
+            sqlUpdate = self.commentUpdate.format(
+                cid = item['cid'],
+                comm=pymysql.escape_string(item['comment'])
+            )
+            self.cursor.execute(sqlUpdate)
         else:
             sqlinsert = self.commentInsert.format(
                 cid=item['cid'],
