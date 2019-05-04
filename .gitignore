@@ -1,0 +1,11 @@
+# ignore font file
+*.woff
+
+# ignore cache file
+*.pyc
+
+# vscode debug file
+*.json
+
+# log
+*.log
