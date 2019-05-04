@@ -1,4 +1,4 @@
-CREATE DATABASE if not exists myFilms DEFAULT CHARACTER SET utf8 COLLATE utf8_general_ci;
+CREATE DATABASE if not exists myFilms DEFAULT CHARACTER SET utf8mb4 collate utf8mb4_bin; --utf8 COLLATE utf8_general_ci;
 
 use myFilms;
 
@@ -7,10 +7,12 @@ CREATE TABLE if not exists `films` (
     `name` varchar(256) NOT NULL COMMENT 'Chinese name for the film',
     `ename` varchar(256) COMMENT 'foreign name for the film',
     `score` float(3,1) COMMENT 'score of the film, such as 9.0; some films do not have score, for these films, the score is -1',
-    `releaseTimeOnlyYear` BOOLEAN COMMENT 'if release time just precise on year, this field is set true',
+    `releaseTimeOnlyYear` int COMMENT 'if release time just precise on year, this field is set true',
     `releaseTime` date COMMENT 'release time',
+    `uniformBoxOffice` bigint COMMENT 'uniform boxOffice',
     `boxOffice` int COMMENT 'box Office, unit is WAN',
     `monetaryUnit` varchar(32) COMMENT 'RMB DOLLARS ...',
+    `uniformScorePeopleNum` int COMMENT 'uniform score people number',
     `scorePeopleNum` float(8,2) COMMENT 'score people number',
     `scorePeopleNumUnit` BOOLEAN default 0 COMMENT 'score people number unit, 1 for WAN, 0 for nothing',
     `actors` text COMMENT 'actor and actress list, split by ,',
