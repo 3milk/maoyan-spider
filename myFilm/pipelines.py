@@ -8,10 +8,10 @@ import pymysql
 from myFilm.items import MyFilmItem, MyCommentItem
 
 class MyFilmPipeline(object):
-    movieInsert = '''insert into films(fid, name, ename, score, releaseTimeOnlyYear, releaseTime, boxOffice, monetaryUnit, \
-        scorePeopleNum, scorePeopleNumUnit, actors, country, tags, length, poster) values \
-    ('{fid}','{name}','{ename}','{score}','{releaseTimeOnlyYear}','{releaseTime}','{boxOffice}','{monetaryUnit}',\
-        '{scorePeopleNum}','{scorePeopleNumUnit}','{actors}','{country}','{tags}','{length}','{poster}' )'''
+    movieInsert = '''insert into films(fid, name, ename, score, releaseTimeOnlyYear, releaseTime, uniformBoxOffice ,boxOffice, monetaryUnit, \
+        uniformScorePeopleNum, scorePeopleNum, scorePeopleNumUnit, actors, country, tags, length, poster) values \
+    ('{fid}','{name}','{ename}','{score}','{releaseTimeOnlyYear}','{releaseTime}','{uniformBoxOffice}','{boxOffice}','{monetaryUnit}',\
+        '{uniformScorePeopleNum}','{scorePeopleNum}','{scorePeopleNumUnit}','{actors}','{country}','{tags}','{length}','{poster}' )'''
 
     def process_item(self, item, spider):
         if not isinstance(item, MyFilmItem):
@@ -22,11 +22,16 @@ class MyFilmPipeline(object):
         results = self.cursor.fetchall()
         if len(results) > 0:
             score = item['score']
+            uniformBoxOffice = item['uniformBoxOffice']
             boxOffice=item['boxOffice']
+            releaseTimeOnlyYear = item['releaseTimeOnlyYear']
+            uniformScorePeopleNum=item['uniformScorePeopleNum']
             scorePeopleNum=item['scorePeopleNum']
             scorePeopleNumUnit=item['scorePeopleNumUnit']
-            sql = 'update films set score=%f, boxOffice=%d, scorePeopleNum=%d, scorePeopleNumUnit=%d \
-                where fid =%s' % (score, boxOffice, scorePeopleNum, scorePeopleNumUnit, fid)
+            sql = 'update films set score=%f, uniformBoxOffice=%d, boxOffice=%d, releaseTimeOnlyYear=%d,\
+                 uniformScorePeopleNum=%d, scorePeopleNum=%d, scorePeopleNumUnit=%d \
+                where fid =%s' % (score, uniformBoxOffice, boxOffice, releaseTimeOnlyYear,\
+                     uniformScorePeopleNum, scorePeopleNum, scorePeopleNumUnit, fid)
             self.cursor.execute(sql)
         else:
             sqlinsert = self.movieInsert.format(
@@ -36,8 +41,10 @@ class MyFilmPipeline(object):
                 score=item['score'],
                 releaseTimeOnlyYear=item.get('releaseTimeOnlyYear'),
                 releaseTime=item.get('releaseTime'),
+                uniformBoxOffice=item['uniformBoxOffice'],
                 boxOffice=item['boxOffice'],
                 monetaryUnit=item['monetaryUnit'],
+                uniformScorePeopleNum=item['uniformScorePeopleNum'],
                 scorePeopleNum=item['scorePeopleNum'],
                 scorePeopleNumUnit=item['scorePeopleNumUnit'],
                 actors=pymysql.escape_string(item.get('actors')),
@@ -56,7 +63,7 @@ class MyFilmPipeline(object):
           'user':'root',
           'password':'root',
           'database':'myFilms',
-          'charset':'utf8',
+          'charset':'utf8mb4', 
           'use_unicode':True,
           }
         self.connect = pymysql.connect(**config)
@@ -104,7 +111,7 @@ class MyCommentPipeline(object):
           'user':'root',
           'password':'root',
           'database':'myFilms',
-          'charset':'utf8',
+          'charset':'utf8mb4',
           'use_unicode':True,
           }
         self.connect = pymysql.connect(**config)
