@@ -1,5 +1,6 @@
 # ignore font file
 *.woff
+*.xml
 
 # ignore cache file
 *.pyc
