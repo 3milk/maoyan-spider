@@ -8,6 +8,7 @@ from fontTools.ttLib import TTFont
 import requests
 from lxml.html import fromstring, tostring
 import string
+from scrapy.spidermiddlewares.httperror import HttpError
 
 class MyFileSpider(scrapy.Spider):
     name = 'myFilm'
@@ -35,14 +36,14 @@ class MyFileSpider(scrapy.Spider):
         self.set_standar_font()
         url = '''https://maoyan.com/films?showType=3&offset={start}'''
         requests = []
-        for i in range(2):
+        for i in range(1):#(2):
             request = Request(url.format(start=i * 30), callback=self.parse)
             requests.append(request)
         return requests
     
     # 建立标准字形库
     def set_standar_font(self):
-        self.stdFont = TTFont('./fonts/std.woff') #deca.woff
+        self.stdFont = TTFont('./std.woff') #deca.woff
         keys = []
         for number, gly in enumerate(self.stdFont.getGlyphOrder()):
             keys.insert(number, gly)
@@ -102,6 +103,7 @@ class MyFileSpider(scrapy.Spider):
     # 解析电影热门评论列表
     def parseComment(self, response):
         item = response.meta['item'] 
+        commList = []
 
         comments = response.xpath('//div[@class="comment-list-container"]/ul/li')
         for number, comment in enumerate(comments):
@@ -133,7 +135,8 @@ class MyFileSpider(scrapy.Spider):
                 commItem['commentTime'] = commentTime[number]
             else:
                 commItem['commentTime'] = "1000-01-01"
-            yield commItem
+            commList.append(commItem) 
+        return commList
 
 
     # 解析电影详细信息
@@ -168,37 +171,60 @@ class MyFileSpider(scrapy.Spider):
 
         # releaseTime releaseTimeOnlyYear
         releaseTime = response.xpath('//div[@class="movie-brief-container"]/ul/li[3]/text()').extract()
-        releaseTime = releaseTime[0].split()[0] if releaseTime else '1000-01-01' #2018-03-05 8:00大陆上映
+        if releaseTime:
+            item['releaseTimeOnlyYear'] = 0 #2018-03-05 8:00大陆上映
+            releaseTime = releaseTime[0].split()[0]
+        else:
+            item['releaseTimeOnlyYear'] = 3
+            releaseTime = '1000-01-01'
+        
         item['releaseTime'] = re.sub("[^0-9-]", "", releaseTime) #2018-03-05大陆上映
-        if('-' not in item['releaseTime']):
+        if (len(item['releaseTime']) == 0): #美国上映
+            item['releaseTimeOnlyYear'] = 3
+            item['releaseTime'] = "1000-01-01"
+        elif ('-' not in item['releaseTime']): #2018
             item['releaseTimeOnlyYear'] = 1
             item['releaseTime'] = item['releaseTime'] + "-01-01"
-        else:
-            item['releaseTimeOnlyYear'] = 0
+        elif (item['releaseTime'].count("-") == 1): #2018-05
+            item['releaseTimeOnlyYear'] = 2
+            item['releaseTime'] = item['releaseTime'] + "-01"
         
         # 正则匹配字体文件
         html = response.xpath('//html').extract()[0]
         font_file = re.findall(r'vfile\.meituan\.net\/colorstone\/(\w+\.woff)', html)[0]
         self.create_font(font_file)
 
+        # score fix 0.0
+        score = response.xpath('//div[@class="movie-index-content score normal-score"]/span[@class="index-left info-num "]/span[@class="stonefont"]/text()').extract()
+        if score:
+            item['score'] = float(self.modify_data(score[0]))
+        else:
+            item['score'] = 0.0
+
         # scorePeople scorePeopleUnit
         scorePeople = response.xpath('//div[@class="movie-stats-container"]/div[@class="movie-index"]/\
             div[@class="movie-index-content score normal-score"]/div[@class="index-right"]/span[@class="score-num"]/span[@class="stonefont"]/text()').extract()
         if scorePeople:
-            if("万" in scorePeople[0]):
-                item['scorePeopleNumUnit'] = 1
-            else:
-                item['scorePeopleNumUnit'] = 0
+            scorePeopleStr = scorePeople[0]
             scorePeople = re.sub(r"[\u4e00-\u9fa5]", "", scorePeople[0])
             item['scorePeopleNum'] = float(self.modify_data(scorePeople))
+            if("万" in scorePeopleStr):
+                item['scorePeopleNumUnit'] = 1
+                item['uniformScorePeopleNum'] = int(item['scorePeopleNum']*10000)
+            else:
+                item['scorePeopleNumUnit'] = 0
+                item['uniformScorePeopleNum'] = int(item['scorePeopleNum'])
         else:
             item['scorePeopleNum'] = 0
             item['scorePeopleNumUnit'] = 0
+            item['uniformScorePeopleNum'] = 0
 
         # boxOffice 
         noinfo = response.xpath('//div[@class="movie-index-content box"]/span[@class="no-info"]/text()').extract()
         if(noinfo): #empty
             item['boxOffice'] = 0
+            item['uniformBoxOffice'] = 0
+            item['monetaryUnit'] = "RMB" 
         else:
             boxOffice = response.xpath('//div[@class="movie-index-content box"]/span[@class="stonefont"]/text()').extract()[0]
             item['boxOffice'] = self.modify_data(boxOffice)
@@ -207,8 +233,13 @@ class MyFileSpider(scrapy.Spider):
                 item['boxOffice'] = int(float(item['boxOffice'])*10000)
             else:
                 item['boxOffice'] = int(item['boxOffice'])
-        item['monetaryUnit'] = None
-        
+            if("美元" in unit):
+                item['monetaryUnit'] = "Dollar"
+                item['uniformBoxOffice'] = int(item['boxOffice']*7*10000)
+            else:
+                item['monetaryUnit'] = "RMB"
+                item['uniformBoxOffice'] = int(item['boxOffice']*10000)
+
         item['actors'] = ''
         celebrityGroup = response.xpath('//div[@class="tab-content-container"]/div[@class="tab-celebrity tab-content"]/div[@class="celebrity-container"]//div[@class="celebrity-group"]')
         for number, group in enumerate(celebrityGroup):
@@ -233,42 +264,30 @@ class MyFileSpider(scrapy.Spider):
         yield item # film item
 
         # 解析评论信息
-        #self.parseComment(response)
-        #comment item
-        comments = response.xpath('//div[@class="comment-list-container"]/ul/li')
-        for number, comment in enumerate(comments):
-            commItem = MyCommentItem()
-            commentID = comment.xpath('./@data-val').extract()
-            commItem['cid'] = int(commentID[0].split(':')[1].replace("}",""))#json.loads(commentID[number])['commentid']
-            commItem['fid'] = int(item['fid'])
-            #score
-            score = comment.xpath('//div[@class="main-header clearfix"]//ul[@class="score-star clearfix"]/@data-score').extract()
-            if score:
-                commItem['score'] = int(score[number]) 
-            else: # drop this comment
-                continue
-            #comment
-            commentContent = comment.xpath('//div[@class="comment-content"]/text()').extract()
-            if commentContent:
-                commItem['comment'] = commentContent[number]
-            else: # drop this comment
-                continue
-            #liked
-            liked = comment.xpath('//div[@class="main-header clearfix"]/div[@class="approve "]/span[@class="num"]/text()').extract()
-            if liked:
-                commItem['liked'] = int(liked[number])
-            else:
-                commItem['liked'] = 0
-            #commentTime
-            commentTime = comment.xpath('//div[@class="main-header clearfix"]/div[@class="time"]/@title').extract()
-            if commentTime:
-                commItem['commentTime'] = commentTime[number]
-            else:
-                commItem['commentTime'] = "1000-01-01"
-            yield commItem
+        commList = self.parseComment(response)
+        for number, comm in enumerate(commList):
+            yield comm
         
+    # request error handler
+    def errBack(self, failure):
+        # log all errback failures,
+        # in case you want to do something special for some errors,
+        # you may need the failure's type
+        self.logger.error(repr(failure))
 
-    # 解析电影基础信息
+        #if isinstance(failure.value, HttpError):
+        if failure.check(HttpError):
+            # you can get the response
+            response = failure.value.response
+            self.logger.error('HttpError on %s', response.url)
+
+        #elif isinstance(failure.value, TimeoutError):
+        elif failure.check(TimeoutError):
+            request = failure.request
+            self.logger.error('TimeoutError on %s', request.url)
+
+
+    # 解析当前页电影基础信息，并请求下一页
     def parse(self, response):
         movies = response.xpath('//div[@class="movies-list"]/dl[@class="movie-list"]//dd')
         for movie in movies:
@@ -276,13 +295,6 @@ class MyFileSpider(scrapy.Spider):
             item['name'] = movie.xpath('.//div[@class="channel-detail movie-item-title"]/@title').extract()[0]
             filmUrl = movie.xpath('.//div[@class="channel-detail movie-item-title"]/a/@href').extract()[0]
             item['fid'] = filmUrl[7:] #/films/12504341
-            noScore = movie.xpath('.//div[@class="channel-detail channel-detail-orange"]/text()').extract()
-            if noScore:
-                item['score'] = 0.0
-            else:
-                integer = movie.xpath('.//div[@class="channel-detail channel-detail-orange"]/i[@class="integer"]/text()').extract()[0]
-                fraction = movie.xpath('.//div[@class="channel-detail channel-detail-orange"]/i[@class="fraction"]/text()').extract()[0]
-                item['score'] = float(integer[:-1]) + 0.1*float(fraction)
 
             posterURL = movie.xpath('.//div[@class="movie-item"]/a/div[@class="movie-poster"]/img/@data-src').extract()[0]
             src = r'https://.*?.jpg' 
@@ -291,7 +303,17 @@ class MyFileSpider(scrapy.Spider):
             item['poster'] = imglist[0] if imglist else ''
 
             filmUrl = "https://maoyan.com" + filmUrl
-            request = Request(filmUrl, callback=self.parseDetail)
+            request = Request(filmUrl, callback=self.parseDetail, errback=self.errBack)
             request.meta['item'] = item
             yield request
-
+        
+        # get next page
+        pagers = response.xpath('//ul[@class="list-pager"]/li/a')
+        if pagers:
+            idx = len(pagers) - 1
+            atext = pagers[idx].xpath('./text()').extract()
+            if "下一页" in atext[0]:
+                ahref = pagers[idx].xpath('./@href').extract()
+                url = '''https://maoyan.com/films{ahref}'''
+                request = Request(url.format(ahref = ahref[0]), callback=self.parse)
+                yield request
