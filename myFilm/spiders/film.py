@@ -32,13 +32,58 @@ class MyFileSpider(scrapy.Spider):
         "ROBOTSTXT_OBEY": False  # 需要忽略ROBOTS.TXT文件
     }
 
+    def __init__(self):
+        self.dShowType = {'showing': 1, 'toShow': 2, 'classic': 3}
+        # region(country)
+        self.dSource = {'China': 2, 'America': 3, 'Korea': 7, 'Japan': 6, 'HongKong': 10, 'TaiWan': 13,
+        'Tailand': 9, 'India': 8, 'France': 4, 'England': 5, 'Russia': 14, 'Italy': 16, 'Spain': 17,
+        'Germany': 11, 'Poland': 19, 'Australia': 20, 'Iran': 21, 'Other': 100}
+        # category
+        self.dCat = {'love': 3, 'comedy': 2, 'animation': 4, 'story': 1, 'move': 5, 'terror': 6, 'thrill': 7,
+        'science': 10, 'suspense': 8, 'adventure': 9, 'crime': 11, 'war': 12, 'documentary': 13, 'fantastic': 14, 'sport': 15,
+        'family': 16, 'ancient': 17, 'emprize': 18, 'westland': 19, 'history': 20, 'biography': 21, 'dance': 23,
+        'black': 24, 'short': 25, 'other': 100}
+        # year
+        self.dYear = {'early': 1, '70': 2, '80':3, '90': 4, '2000_2010': 5, '2011': 6,
+        '2012': 7, '2013': 8, '2014': 9, '2015': 10, '2016': 11, '2017': 12, '2018': 13, '2019': 14, 'after': 100}
+        # sort
+        self.dSort = {'hot': 1, 'time': 2, 'score': 3}
+
+    def setCrawlRule(self):
+        self.ddSource = {}
+        #for k, v in self.dSource.items():
+        self.ddSource['China'] = 2
+
+        self.ddCat = {}
+        for k, v in self.dCat.items(): # all category
+            self.ddCat[k] = v
+
+        self.ddYear = {}
+        for k, v in self.dYear.items():
+            if v < 100 and v > 4: #2000~2019
+                self.ddYear[k] = v
+        
+
+    def genUrl(self):
+        requests = []
+        url = '''https://maoyan.com/films?showType=3&sortId=1&yearId={Year}&catId={Cat}&sourceId={Source}'''
+        # https://maoyan.com/films?showType=3&sortId=1&yearId=13&catId=3&sourceId=2 # love china 2018 hot
+        self.setCrawlRule()
+        for source in self.ddSource.values():
+            for cat in self.ddCat.values():
+                for year in self.ddYear.values():
+                    request = Request(url.format(Year=year, Cat=cat, Source=source), callback=self.parse)
+                    requests.append(request)
+        return requests
+
     def start_requests(self):
         self.set_standar_font()
         url = '''https://maoyan.com/films?showType=3&offset={start}'''
         requests = []
-        for i in range(1):#(2):
-            request = Request(url.format(start=i * 30), callback=self.parse)
-            requests.append(request)
+        requests = self.genUrl()
+        # for i in range(1):#(2):
+        #     request = Request(url.format(start=i * 30), callback=self.parse)
+        #     requests.append(request)
         return requests
     
     # 建立标准字形库
@@ -195,11 +240,25 @@ class MyFileSpider(scrapy.Spider):
         self.create_font(font_file)
 
         # score fix 0.0
-        score = response.xpath('//div[@class="movie-index-content score normal-score"]/span[@class="index-left info-num "]/span[@class="stonefont"]/text()').extract()
-        if score:
-            item['score'] = float(self.modify_data(score[0]))
-        else:
-            item['score'] = 0.0
+        # score or forward
+        hasScore = False
+        item['score'] = 0.0
+        scoreTitle = response.xpath('//p[@class="movie-index-title"]/text()').extract()
+        if scoreTitle:
+            title = scoreTitle[0]
+            if "评分" in title:
+                hasScore = True
+            
+        if hasScore:
+            # 2 types span: 1)info-num  2) info-num one-line 
+            score = response.xpath('//div[@class="movie-index-content score normal-score"]/span[@class="index-left info-num "]/span[@class="stonefont"]/text()').extract()
+            if score:
+                item['score'] = float(self.modify_data(score[0]))
+            else:
+                score = response.xpath('//div[@class="movie-index-content score normal-score"]/span[@class="index-left info-num one-line"]/span[@class="stonefont"]/text()').extract()
+                if score:
+                    item['score'] = float(self.modify_data(score[0]))
+
 
         # scorePeople scorePeopleUnit
         scorePeople = response.xpath('//div[@class="movie-stats-container"]/div[@class="movie-index"]/\
